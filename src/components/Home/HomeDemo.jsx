@@ -1,26 +1,33 @@
 "use client"
-import { useState, useEffect, useRef } from "react"
-import styled from "styled-components"
+import { useState, useEffect } from "react"
+import styled, { keyframes } from "styled-components"
 import { useNavigate } from "react-router-dom"
-import { initialMovies, topMovies, recommendedMovies } from "../../data/data"
+import { collection, getDocs, query, limit, where } from "firebase/firestore"
+import { db } from "../../firebase/firebase"
+import { motion, AnimatePresence } from "framer-motion"
 import useBlockBackNavigation from "../../hooks/BlockNavigation"
-
-const categories = ["Todas", "Terror", "Acción", "Drama", "Ciencia Ficción", "Animadas"]
+// Importar el contexto de MyList
+import { useMyList } from "../../context/MyListContext"
 
 const HomeDemo = ({ user }) => {
   const [loading, setLoading] = useState(true)
-  const [showVideo, setShowVideo] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState("Todas")
-  const [movies, setMovies] = useState(initialMovies)
-  const [currentTopIndex, setCurrentTopIndex] = useState(0)
+  const [movies, setMovies] = useState([])
+  const [actionMovies, setActionMovies] = useState([])
+  const [thrillerMovies, setThrillerMovies] = useState([])
+  const [horrorMovies, setHorrorMovies] = useState([])
+  const [dramaMovies, setDramaMovies] = useState([])
+  const [animatedMovies, setAnimatedMovies] = useState([])
+  const [comedyMovies, setComedyMovies] = useState([])
   const [featuredMovie, setFeaturedMovie] = useState(null)
   const [clickedMovie, setClickedMovie] = useState(null)
-  const videoRef = useRef(null)
-  const topMoviesRef = useRef(null)
+  const [isChangingFeatured, setIsChangingFeatured] = useState(false)
   const navigate = useNavigate()
+  // Añadir el hook useMyList
+  const { isInMyList, toggleMyList } = useMyList()
 
   useBlockBackNavigation(user !== null)
 
+  // Redireccionar si no hay usuario
   useEffect(() => {
     if (!user) {
       navigate("/home")
@@ -28,82 +35,115 @@ const HomeDemo = ({ user }) => {
     }
   }, [user, navigate])
 
+  // Cargar películas desde Firestore
   useEffect(() => {
-    const randomMovie = movies[Math.floor(Math.random() * movies.length)]
-    setFeaturedMovie(randomMovie)
+    const fetchMovies = async () => {
+      try {
+        setLoading(true)
+
+        // Obtener todas las películas
+        const moviesRef = collection(db, "movies")
+        const moviesSnapshot = await getDocs(moviesRef)
+        const moviesData = moviesSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }))
+
+        setMovies(moviesData)
+
+        // Obtener películas por categorías
+        const fetchMoviesByCategory = async (category) => {
+          const categoryQuery = query(collection(db, "movies"), where("category", "==", category), limit(10))
+          const querySnapshot = await getDocs(categoryQuery)
+          return querySnapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }))
+        }
+
+        // Cargar películas por categoría
+        const actionData = await fetchMoviesByCategory("Action")
+        const thrillerData = await fetchMoviesByCategory("Suspense")
+        const horrorData = await fetchMoviesByCategory("Horror")
+        const dramaData = await fetchMoviesByCategory("Drama")
+        const animatedData = await fetchMoviesByCategory("Animated")
+        const comedyData = await fetchMoviesByCategory("Comedy")
+
+        setActionMovies(actionData)
+        setThrillerMovies(thrillerData)
+        setHorrorMovies(horrorData)
+        setDramaMovies(dramaData)
+        setAnimatedMovies(animatedData)
+        setComedyMovies(comedyData)
+
+        // Seleccionar película destacada aleatoria
+        const randomMovie = moviesData[Math.floor(Math.random() * moviesData.length)]
+        setFeaturedMovie(randomMovie)
+
+        setLoading(false)
+      } catch (error) {
+        console.error("Error al cargar películas:", error)
+        setLoading(false)
+      }
+    }
+
+    fetchMovies()
+  }, [])
+
+  // Cambiar película destacada cada 10 segundos
+  useEffect(() => {
+    if (movies.length === 0) return
 
     const interval = setInterval(() => {
-      const newRandomMovie = movies[Math.floor(Math.random() * movies.length)]
-      setFeaturedMovie(newRandomMovie)
-    }, 30000)
+      setIsChangingFeatured(true)
+      setTimeout(() => {
+        const newRandomMovie = movies[Math.floor(Math.random() * movies.length)]
+        setFeaturedMovie(newRandomMovie)
+        setIsChangingFeatured(false)
+      }, 500)
+    }, 10000)
 
     return () => clearInterval(interval)
   }, [movies])
 
-  useEffect(() => {
-    if (videoRef.current && featuredMovie) {
-      videoRef.current.load()
-      videoRef.current.play().catch((err) => console.error("Error al reproducir video:", err))
-    }
-  }, [featuredMovie])
-
-  useEffect(() => {
-    const timeout = setTimeout(() => setLoading(false), 3000)
-    return () => clearTimeout(timeout)
-  }, [])
-
-  useEffect(() => {
-    const startCycle = () => {
-      setShowVideo(false)
-      setTimeout(() => {
-        setShowVideo(true)
-        if (videoRef.current) videoRef.current.play()
-      }, 6000)
-    }
-
-    const handleVideoEnd = () => {
-      setShowVideo(false)
-      setTimeout(startCycle, 3000)
-    }
-
-    startCycle()
-
-    if (videoRef.current) {
-      videoRef.current.addEventListener("ended", handleVideoEnd)
-    }
-
-    return () => {
-      if (videoRef.current) {
-        videoRef.current.removeEventListener("ended", handleVideoEnd)
-      }
-    }
-  }, [])
-
-  const handleCategoryClick = (category) => {
-    setSelectedCategory(category)
-  }
-
-  const handleTopMoviesScroll = (direction) => {
-    const visibleMovies = window.innerWidth <= 768 ? 2 : 6
-    setCurrentTopIndex((prev) => {
-      const newIndex = direction === "left" ? prev - 1 : prev + 1
-      return Math.max(0, Math.min(topMovies.length - visibleMovies, newIndex))
-    })
-  }
-
+  // Navegar a la página de detalle
   const handleWatchClick = (movieId) => {
     navigate(`/detail/${movieId}`)
   }
 
-  const filteredMovies =
-    selectedCategory === "Todas" ? movies : movies.filter((movie) => movie.category === selectedCategory)
-
+  // Mostrar modal con detalles de la película
   const handleMovieClick = (movie) => {
     setClickedMovie(movie)
   }
 
+  // Cerrar modal
   const handleCloseModal = () => {
     setClickedMovie(null)
+  }
+
+  // Renderizar una categoría de películas
+  const renderMovieCategory = (title, movies) => {
+    if (!movies || movies.length === 0) return null
+
+    return (
+      <CategorySection>
+        <CategoryTitle>{title}</CategoryTitle>
+        <MovieRow>
+          {movies.map((movie, index) => (
+            <MovieCard
+              key={movie.id}
+              onClick={() => handleMovieClick(movie)}
+              as={motion.div}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: index * 0.05 }}
+            >
+              <MoviePoster src={movie.poster || "/placeholder.svg?height=300&width=200"} alt={movie.title} />
+            </MovieCard>
+          ))}
+        </MovieRow>
+      </CategorySection>
+    )
   }
 
   if (loading) {
@@ -115,531 +155,519 @@ const HomeDemo = ({ user }) => {
   }
 
   return (
-    <>
-      <Container>
-        <BackgroundVideo ref={videoRef} autoPlay muted show={showVideo}>
-          <source src={featuredMovie?.trailer} type="video/mp4" />
-        </BackgroundVideo>
-        <StaticImage src={featuredMovie?.staticImage} alt={featuredMovie?.title} show={!showVideo} />
-        <MovieDetails>
-          <h1>{featuredMovie?.title}</h1>
-          <p>{featuredMovie?.description}</p>
-          <div className="details">
-            <span> {featuredMovie?.category}</span>
-            <span> {featuredMovie?.duration}</span>
-          </div>
-          <WatchNowButton onClick={() => handleWatchClick(featuredMovie?.id)}>Ver ahora</WatchNowButton>
-        </MovieDetails>
-      </Container>
+    <PageContainer>
+      <HeroSection>
+        <AnimatePresence mode="wait">
+          <FeaturedBanner
+            key={featuredMovie?.id}
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            transition={{ duration: 0.5 }}
+          >
+            <StaticImage src={featuredMovie?.banner || featuredMovie?.poster} alt={featuredMovie?.title} />
+            <HeroOverlay />
+          </FeaturedBanner>
+        </AnimatePresence>
 
-      <MovieSection>
-        <h2 style={{ color: "white", textAlign: "center" }}>Películas recomendadas</h2>
-        <MovieList>
-          {recommendedMovies.map((movie, index) => (
-            <MovieItem key={index} onClick={() => handleMovieClick(movie)}>
-              <img src={movie.poster || "/placeholder.svg"} alt={movie.title} width="200" />
-            </MovieItem>
-          ))}
-        </MovieList>
-      </MovieSection>
+        <HeroContent>
+          <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8 }}>
+            <HeroTitle>{featuredMovie?.title}</HeroTitle>
+            <HeroDescription>{featuredMovie?.description}</HeroDescription>
+            <HeroMetadata>
+              <MetadataItem>{featuredMovie?.category}</MetadataItem>
+              <MetadataDot />
+              <MetadataItem>{featuredMovie?.duration}</MetadataItem>
+              <MetadataDot />
+              <MetadataItem>{featuredMovie?.year}</MetadataItem>
+            </HeroMetadata>
+            <HeroButtonGroup>
+              <WatchButton onClick={() => handleWatchClick(featuredMovie?.id)}>
+                <PlayIcon>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path
+                      d="M4 11.9999V8.43989C4 4.01989 7.13 2.2099 10.96 4.4199L14.05 6.1999L17.14 7.9799C20.97 10.1899 20.97 13.8099 17.14 16.0199L14.05 17.7999L10.96 19.5799C7.13 21.7899 4 19.9799 4 15.5599V11.9999Z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </PlayIcon>
+                Ver ahora
+              </WatchButton>
+              <AddToListButton isActive={isInMyList(featuredMovie?.id)} onClick={() => toggleMyList(featuredMovie)}>
+                <PlusIcon>
+                  {isInMyList(featuredMovie?.id) ? (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path
+                        d="M9 22H15C20 22 22 20 22 15V9C22 4 20 2 15 2H9C4 2 2 4 2 9V15C2 20 4 22 9 22Z"
+                        fill="#E91E63"
+                        stroke="#E91E63"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M7.75 12L10.58 14.83L16.25 9.17"
+                        stroke="white"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  ) : (
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path
+                        d="M6 12H18"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                      <path
+                        d="M12 18V6"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                </PlusIcon>
+                {isInMyList(featuredMovie?.id) ? "Agregado" : "Mi lista"}
+              </AddToListButton>
+            </HeroButtonGroup>
+          </motion.div>
+        </HeroContent>
+      </HeroSection>
 
-      <TopMoviesSection>
-        <h2 
-        style={{ color: "white", textAlign: "center" }}>TOP 10</h2>
-        <h2
-         style={{ color: "white", textAlign: "center" }}>Películas más vistas</h2>
+      <ContentContainer>
+        {renderMovieCategory("Películas de Acción", actionMovies)}
+        {renderMovieCategory("Películas de Suspenso", thrillerMovies)}
+        {renderMovieCategory("Películas de Terror", horrorMovies)}
+        {renderMovieCategory("Películas de Drama", dramaMovies)}
+        {renderMovieCategory("Películas Animadas", animatedMovies)}
+        {renderMovieCategory("Películas de Comedia", comedyMovies)}
+      </ContentContainer>
 
-        <TopMoviesContainer>
-          <ArrowButton className="left" onClick={() => handleTopMoviesScroll("left")}>
-            &#10094;
-          </ArrowButton>
-          <TopMoviesList ref={topMoviesRef} style={{ transform: `translateX(-${currentTopIndex * (230 / 6)}%)` }}>
-            {topMovies.map((movie, index) => (
-              <TopMovieItem key={index} onClick={() => handleMovieClick(movie)}>
-                <img src={movie.poster || "/placeholder.svg"} alt={movie.title} />
-                <div className="rank">{movie.rank}</div>
-              </TopMovieItem>
-            ))}
-          </TopMoviesList>
-          <ArrowButton className="right" onClick={() => handleTopMoviesScroll("right")}>
-            &#10095;
-          </ArrowButton>
-        </TopMoviesContainer>
-      </TopMoviesSection>
-
-      <CategoriesSection>
-        <h2 style={{ color: "white", textAlign: "center" }}>Categorías</h2>
-        <CategoriesList>
-          {categories.map((category, index) => (
-            <CategoryItem
-              key={index}
-              onClick={() => handleCategoryClick(category)}
-              style={{
-                background: selectedCategory === category ? "#8E24AA" : "#1c1c1c",
-              }}
+      <AnimatePresence>
+        {clickedMovie && (
+          <Modal
+            onClick={handleCloseModal}
+            as={motion.div}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+          >
+            <ModalContent
+              onClick={(e) => e.stopPropagation()}
+              as={motion.div}
+              initial={{ opacity: 0, y: 50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 50 }}
+              transition={{ type: "spring", damping: 25 }}
             >
-              {category}
-            </CategoryItem>
-          ))}
-        </CategoriesList>
-      </CategoriesSection>
-
-      <MovieSection>
-        <h2 style={{ color: "white", textAlign: "center" }}>
-          {selectedCategory === "Todas" ? "Todas las películas" : `Películas de ${selectedCategory}`}
-        </h2>
-        <MovieList>
-          {filteredMovies.map((movie, index) => (
-            <MovieItem key={index} onClick={() => handleMovieClick(movie)}>
-              <img src={movie.poster || "/placeholder.svg"} alt={movie.title} />
-            </MovieItem>
-          ))}
-        </MovieList>
-      </MovieSection>
-
-      {clickedMovie && (
-          <Modal onClick={handleCloseModal}>
-          <ModalContent onClick={(e) => e.stopPropagation()}>
-            <video muted loop autoPlay>
-              <source src={clickedMovie.trailer} type="video/mp4" />
-            </video>
-            <div className="info">
-              <h4>{clickedMovie.title}</h4>
-              <TruncatedDescription>{clickedMovie.description}</TruncatedDescription>
-              <div className="details">
-                <span>{clickedMovie.category}</span>
-                <span>{clickedMovie.duration}</span>
-              </div>
-              <ButtonContainer>
-                <CloseButton onClick={handleCloseModal}>Volver</CloseButton>
-                <WatchNowButton onClick={() => handleWatchClick(clickedMovie?.id)}>Ver película</WatchNowButton>
-              </ButtonContainer>
-            </div>
-          </ModalContent>
-        </Modal>
-      )}
-    </>
+              <ModalImageContainer>
+                <ModalImage src={clickedMovie.banner || clickedMovie.poster} alt={clickedMovie.title} />
+                <ModalImageOverlay />
+                <ModalTitle>{clickedMovie.title}</ModalTitle>
+              </ModalImageContainer>
+              <ModalInfo>
+                <ModalDescription>{clickedMovie.description}</ModalDescription>
+                <ModalMetadata>
+                  <ModalMetadataItem>{clickedMovie.category}</ModalMetadataItem>
+                  <ModalMetadataDot />
+                  <ModalMetadataItem>{clickedMovie.duration}</ModalMetadataItem>
+                  <ModalMetadataDot />
+                  <ModalMetadataItem>{clickedMovie.year}</ModalMetadataItem>
+                </ModalMetadata>
+                <ModalButtonGroup>
+                  <ModalButton onClick={handleCloseModal}>Volver</ModalButton>
+                  <ModalButton primary onClick={() => handleWatchClick(clickedMovie?.id)}>
+                    <PlayIcon>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path
+                          d="M4 11.9999V8.43989C4 4.01989 7.13 2.2099 10.96 4.4199L14.05 6.1999L17.14 7.9799C20.97 10.1899 20.97 13.8099 17.14 16.0199L14.05 17.7999L10.96 19.5799C7.13 21.7899 4 19.9799 4 15.5599V11.9999Z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                    </PlayIcon>
+                    Ver película
+                  </ModalButton>
+                </ModalButtonGroup>
+              </ModalInfo>
+            </ModalContent>
+          </Modal>
+        )}
+      </AnimatePresence>
+    </PageContainer>
   )
 }
 
 export default HomeDemo
 
-const Container = styled.div`
-  width: 100%;
-  height: 91vh;
-  position: relative;
-  overflow: hidden;
+// Animaciones
+const fadeIn = keyframes`
+  from { opacity: 0; }
+  to { opacity: 1; }
+`
 
+const pulse = keyframes`
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+`
+
+const spin = keyframes`
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+`
+
+// Estilos
+const PageContainer = styled.div`
+  background-color: #0a0a0a;
+  min-height: 100vh;
+  color: #fff;
+  padding-top: 0; /* Eliminado el espacio para el header fijo */
+  
   @media (max-width: 768px) {
-    height: 70vh;
-  }
-
-  @media (max-width: 480px) {
-    height: 60vh;
+    padding-top: 0;
   }
 `
 
-const BackgroundVideo = styled.video`
-  background-color: #000000;
+const HeroSection = styled.div`
+  position: relative;
+  height: 90vh;
+  min-height: 600px;
+  overflow: hidden;
+  
+  @media (max-width: 768px) {
+    height: 100vh;
+    min-height: 500px;
+  }
+  
+  @media (max-width: 480px) {
+    height: 100vh;
+    min-height: 400px;
+  }
+`
+
+const FeaturedBanner = styled(motion.div)`
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  display: ${(props) => (props.show ? "block" : "none")};
-  background: linear-gradient(180deg, rgba(11, 11, 11, 0.49) 0%, rgba(11, 11, 11, 1) 100%);
 `
 
 const StaticImage = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`
+
+const HeroOverlay = styled.div`
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  display: ${(props) => (props.show ? "block" : "none")};
-`
-
-const MovieDetails = styled.div`
-  position: absolute;
-  bottom: 40px;
-  left: 20px;
-  color: #ccd0cf;
-  max-width: 500px;
-  background: rgba(13, 13, 13, 0.72);
-  padding: 20px;
-  border-radius: 10px;
+  background: linear-gradient(
+    0deg,
+    rgba(10, 10, 10, 1) 0%,
+    rgba(10, 10, 10, 0.8) 50%,
+    rgba(10, 10, 10, 0.4) 100%
+  );
   z-index: 2;
-
-  h1 {
-    font-size: 2rem;
-    margin-bottom: 10px;
-  }
-
-  p {
-    font-size: 1rem;
-    margin-bottom: 15px;
-  }
-
-  .details {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 10px;
-    font-size: 0.9rem;
-    color: white;
-  }
-
-  @media (min-width: 1440px) {
-    max-width: 600px;
-    padding: 25px;
-
-    h1 {
-      font-size: 2.5rem;
-    }
-
-    p {
-      font-size: 1.2rem;
-    }
-
-    .details {
-      font-size: 1rem;
-    }
-  }
-
-  @media (max-width: 1024px) {
-    max-width: 400px;
-    padding: 15px;
-    background: rgba(13, 13, 13, 0.43);
-
-    h1 {
-      font-size: 1.8rem;
-    }
-
-    p {
-      font-size: 0.9rem;
-    }
-  }
-
-  @media (max-width: 768px) {
-    max-width: 90%;
-    padding: 10px;
-    bottom: 20px;
-    left: 10px;
-    background: rgba(13, 13, 13, 0.39);
-
-    h1 {
-      font-size: 1.5rem;
-    }
-
-    p {
-      font-size: 0.8rem;
-    }
-  }
-
-  @media (max-width: 480px) {
-    background: rgba(13, 13, 13, 0.39);
-    h1 {
-      font-size: 1.2rem;
-    }
-
-    p {
-      font-size: 0.7rem;
-    }
-  }
 `
 
-const WatchNowButton = styled.button`
-  background: linear-gradient(to right, #d81b60, #8e24aa);
-  color: #fff;
-  padding: 15px 30px;
-  font-size: 18px;
-  cursor: pointer;
-  border-radius: 5px;
-  font-weight: bold;
-  border: none;
-
-  &:hover {
-    background: white;
-    color: black;
-  }
-
-  @media (max-width: 768px) {
-    padding: 10px 20px;
-    font-size: 16px;
-  }
-
-  @media (max-width: 480px) {
-    padding: 8px 16px;
-    font-size: 14px;
-  }
-`
-
-const MovieSection = styled.div`
-  background: #000000;
-  padding: 40px 20px;
-  position: relative;
-  margin-top: 0;
-
-  @media (max-width: 768px) {
-    padding: 20px 10px;
-  }
-`
-
-const MovieList = styled.div`
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 30px;
-  justify-content: center;
-  margin: 0 auto;
-  max-width: 1200px;
-
-  @media (max-width: 1024px) {
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 25px;
-  }
-
-  @media (max-width: 768px) {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 20px;
-  }
-
-  @media (max-width: 480px) {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 15px;
-  }
-`
-
-const MovieItem = styled.div`
-  position: relative;
-  width: 100%;
-  cursor: pointer;
-
-  img {
-    width: 100%;
-    height: auto;
-    border-radius: 8px;
-    transition: transform 0.3s ease;
-  }
-
-  &:hover img {
-    transform: scale(1.05);
-  }
-
-  @media (max-width: 768px) {
-    width: 100%;
-  }
-`
-
-const TopMoviesSection = styled.section`
-  background: #000000;
-  padding: 60px 20px;
-  position: relative;
-  margin-top: 0;
-  overflow: hidden;
-
-  @media (max-width: 768px) {
-    padding: 40px 10px;
-  }
-`
-
-const TopMoviesContainer = styled.div`
-  position: relative;
-  width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
-  overflow: hidden;
-  padding: 20px 0;
-
-  @media (max-width: 768px) {
-    padding: 10px 0;
-  }
-`
-
-const ArrowButton = styled.button`
+const HeroContent = styled.div`
   position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  background: rgba(9, 11, 19, 0.5);
-  border: none;
+  bottom: 10%;
+  left: 5%;
+  max-width: 600px;
+  z-index: 3;
+  
+  @media (max-width: 768px) {
+    bottom: 15%;
+    left: 5%;
+    right: 5%;
+    max-width: 90%;
+  }
+  
+  @media (max-width: 480px) {
+    bottom: 12%;
+  }
+`
+
+const HeroTitle = styled.h1`
+  font-size: 3.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  
+  @media (max-width: 768px) {
+    font-size: 2.5rem;
+    margin-bottom: 0.75rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+  }
+`
+
+const HeroDescription = styled.p`
+  font-size: 1.1rem;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+  opacity: 0.9;
+  max-width: 90%;
+  
+  @media (max-width: 768px) {
+    font-size: 1rem;
+    line-height: 1.5;
+    -webkit-line-clamp: 3;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    margin-bottom: 1rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 0.9rem;
+    line-height: 1.4;
+    -webkit-line-clamp: 2;
+    margin-bottom: 0.75rem;
+  }
+`
+
+const HeroMetadata = styled.div`
+  display: flex;
+  align-items: center;
+  margin-bottom: 2rem;
+  
+  @media (max-width: 768px) {
+    margin-bottom: 1.5rem;
+  }
+  
+  @media (max-width: 480px) {
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+`
+
+const MetadataItem = styled.span`
+  font-size: 1rem;
+  opacity: 0.8;
+  
+  @media (max-width: 480px) {
+    font-size: 0.9rem;
+  }
+`
+
+const MetadataDot = styled.span`
+  width: 4px;
+  height: 4px;
   border-radius: 50%;
-  width: 40px;
-  height: 40px;
+  background-color: rgba(255, 255, 255, 0.6);
+  margin: 0 10px;
+  
+  @media (max-width: 480px) {
+    width: 3px;
+    height: 3px;
+    margin: 0 6px;
+  }
+`
+
+const HeroButtonGroup = styled.div`
+  display: flex;
+  gap: 1rem;
+  
+  @media (max-width: 768px) {
+    gap: 0.75rem;
+  }
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+`
+
+const WatchButton = styled.button`
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 0.75rem;
+  background: linear-gradient(to right, #E91E63, #9C27B0);
   color: white;
-  font-size: 1.5rem;
+  border: none;
+  border-radius: 8px;
+  padding: 0.875rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 600;
   cursor: pointer;
-  z-index: 3;
   transition: all 0.3s ease;
-
+  
   &:hover {
-    background: rgba(29, 29, 29, 0.8);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(233, 30, 99, 0.4);
   }
-
-  &.left {
-    left: 10px;
-  }
-
-  &.right {
-    right: 10px;
-  }
-
+  
   @media (max-width: 768px) {
-    width: 30px;
-    height: 30px;
-    font-size: 1.2rem;
+    padding: 0.75rem 1.25rem;
+    font-size: 0.95rem;
   }
-
+  
   @media (max-width: 480px) {
-    width: 25px;
-    height: 25px;
-    font-size: 1rem;
-  }
-`
-
-
-const TopMoviesList = styled.div`
-  display: flex;
-  gap: 20px;
-  transition: transform 0.5s ease;
-  padding: 0 2rem;
-
-  @media (max-width: 768px) {
-    gap: 15px;
-    padding: 0 1rem;
-  }
-
-  @media (max-width: 480px) {
-    gap: 10px;
-    padding: 0 0.5rem;
-  }
-`
-
-const TopMovieItem = styled.div`
-  position: relative;
-  flex: 0 0 200px;
-  transition: transform 0.3s ease;
-
-  &:hover {
-    transform: scale(1.1);
-    z-index: 2;
-  }
-
-  img {
     width: 100%;
-    height: 300px;
-    object-fit: cover;
-    border-radius: 8px;
-    box-shadow: 0 4px 20px rgba(9, 11, 19, 0.3);
-    transition: all 0.3s ease;
-    border: 2px solid transparent;
-  }
-
-  &:hover img {
-    border-color: rgba(255, 255, 255, 0.8);
-    border-width: 4px;
-  }
-
-  .rank {
-    position: absolute;
-    left: 0;
-    bottom: 0;
-    font-size: 5rem;
-    font-weight: bold;
-    color: transparent;
-    -webkit-text-stroke: 2px #fff;
-    text-shadow: 0 0 10px rgba(141, 36, 170, 0.53);
-    transform: translate(-30%, 20%);
-    transition: all 0.3s ease;
-  }
-
-  &:hover .rank {
-    font-size: 6rem;
-    color: #8e24aa;
-    -webkit-text-stroke: 1px #fff;
-    transform: translate(-40%, 5%);
-  }
-
-  @media (max-width: 768px) {
-    flex: 0 0 150px;
-
-    img {
-      height: 225px;
-    }
-
-    .rank {
-      font-size: 4rem;
-    }
-
-    &:hover .rank {
-      font-size: 5rem;
-    }
-  }
-
-  @media (max-width: 480px) {
-    flex: 0 0 120px;
-
-    img {
-      height: 180px;
-    }
-
-    .rank {
-      font-size: 3rem;
-    }
-
-    &:hover .rank {
-      font-size: 4rem;
+    padding: 0.7rem 1rem;
+    
+    svg {
+      width: 20px;
+      height: 20px;
     }
   }
 `
 
-const CategoriesSection = styled.div`
-  background: #000000;
-  padding: 40px 20px;
-  position: relative;
-  margin-top: 0;
-
-  @media (max-width: 768px) {
-    padding: 20px 10px;
-  }
-`
-
-const CategoriesList = styled.div`
+const PlayIcon = styled.span`
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 20px;
+`
 
+const AddToListButton = styled.button`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  background: ${(props) => (props.isActive ? "rgba(233, 30, 99, 0.2)" : "rgba(255, 255, 255, 0.1)")};
+  backdrop-filter: blur(10px);
+  color: ${(props) => (props.isActive ? "#E91E63" : "white")};
+  border: 1px solid ${(props) => (props.isActive ? "#E91E63" : "rgba(255, 255, 255, 0.2)")};
+  border-radius: 8px;
+  padding: 0.875rem 1.5rem;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: ${(props) => (props.isActive ? "rgba(233, 30, 99, 0.3)" : "rgba(255, 255, 255, 0.2)")};
+  }
+  
   @media (max-width: 768px) {
-    gap: 10px;
+    padding: 0.75rem 1.25rem;
+    font-size: 0.95rem;
+  }
+  
+  @media (max-width: 480px) {
+    width: 100%;
+    padding: 0.7rem 1rem;
+    
+    svg {
+      width: 18px;
+      height: 18px;
+    }
   }
 `
 
-const CategoryItem = styled.div`
-  background: #000000;
-  color: #ccd0cf;
-  padding: 15px 30px;
-  border-radius: 5px;
-  font-size: 1.2rem;
-  cursor: pointer;
-  transition: background 0.3s ease;
+const PlusIcon = styled.span`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+`
 
-  &:hover {
-    background-color: #4a5c6a;
-    color: white;
-  }
-
-  @media (max-width: 768px) {
-    padding: 10px 20px;
-    font-size: 1rem;
-  }
-
+const ContentContainer = styled.div`
+  padding: 0 5%;
+  
   @media (max-width: 480px) {
-    padding: 8px 16px;
-    font-size: 0.9rem;
+    padding: 0 4%;
   }
+`
+
+const CategorySection = styled.section`
+  margin-bottom: 3rem;
+  
+  @media (max-width: 768px) {
+    margin-bottom: 2.5rem;
+  }
+  
+  @media (max-width: 480px) {
+    margin-bottom: 2rem;
+  }
+`
+
+const CategoryTitle = styled.h2`
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 1.25rem;
+  color: #fff;
+  
+  @media (max-width: 768px) {
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+  }
+`
+
+const MovieRow = styled.div`
+  display: flex;
+  overflow-x: auto;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  
+  /* Ocultar scrollbar pero mantener funcionalidad */
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+  &::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, Opera */
+  }
+  
+  @media (max-width: 480px) {
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+  }
+`
+
+const MovieCard = styled.div`
+  flex: 0 0 auto;
+  width: 180px;
+  height: 270px;
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  
+  &:hover {
+    transform: scale(1.05);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.3);
+  }
+  
+  @media (max-width: 768px) {
+    width: 160px;
+    height: 240px;
+    border-radius: 12px;
+  }
+  
+  @media (max-width: 480px) {
+    width: 120px;
+    height: 180px;
+    border-radius: 10px;
+    
+    &:hover {
+      transform: scale(1.03);
+    }
+  }
+`
+
+const MoviePoster = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 `
 
 const Modal = styled.div`
@@ -648,85 +676,233 @@ const Modal = styled.div`
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.8);
+  background-color: rgba(0, 0, 0, 0.9);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
+  padding: 2rem;
+  
+  @media (max-width: 768px) {
+    padding: 1.5rem;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 1rem;
+  }
 `
 
 const ModalContent = styled.div`
-  background:rgba(0, 0, 0, 0.81);
-  padding: 20px;
-  border-radius: 10px;
-  width: 80%;
-  max-width: 600px;
+  background-color: #121212;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 550px; // Reducido aún más para mejor estética
   max-height: 80vh;
-  overflow-y: auto;
-
-  video {
-    width: 100%;
-    border-radius: 8px;
-    margin-bottom: 20px;
-  }
-
-  h4 {
-    font-size: 1.8rem;
-    color: #fff;
-    margin-bottom: 10px;
-  }
-
-  .details {
-    display: flex;
-    justify-content: space-between;
-    color: #ccc;
-    margin-bottom: 20px;
-  }
-
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  
   @media (max-width: 768px) {
-    width: 90%;
-    padding: 15px;
+    max-height: 80vh;
+    max-width: 90%;
+    border-radius: 12px;
+  }
+  
+  @media (max-width: 480px) {
+    max-width: 95%;
+    max-height: 85vh;
+    border-radius: 10px;
+  }
+`
 
-    h4 {
-      font-size: 1.5rem;
+const ModalImageContainer = styled.div`
+  position: relative;
+  width: 100%;
+  height: 250px; // Altura reducida para mejor proporción
+  
+  @media (max-width: 768px) {
+    height: 180px;
+  }
+  
+  @media (max-width: 480px) {
+    height: 150px;
+  }
+`
+
+const ModalImage = styled.img`
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+`
+
+const ModalImageOverlay = styled.div`
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    0deg,
+    rgba(18, 18, 18, 1) 0%,
+    rgba(18, 18, 18, 0.8) 50%,
+    rgba(18, 18, 18, 0.4) 100%
+  );
+`
+
+const ModalTitle = styled.h2`
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  font-size: 2rem;
+  font-weight: 700;
+  color: white;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  
+  @media (max-width: 768px) {
+    font-size: 1.5rem;
+    bottom: 15px;
+    left: 15px;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 1.25rem;
+    bottom: 12px;
+    left: 12px;
+  }
+`
+
+const ModalInfo = styled.div`
+  padding: 1.5rem;
+  overflow-y: auto;
+  
+  @media (max-width: 768px) {
+    padding: 1.25rem;
+  }
+  
+  @media (max-width: 480px) {
+    padding: 1rem;
+  }
+`
+
+const ModalDescription = styled.p`
+  font-size: 1rem;
+  line-height: 1.6;
+  margin-bottom: 1.5rem;
+  color: rgba(255, 255, 255, 0.8);
+  
+  @media (max-width: 768px) {
+    font-size: 0.95rem;
+    line-height: 1.5;
+    margin-bottom: 1.25rem;
+  }
+  
+  @media (max-width: 480px) {
+    font-size: 0.9rem;
+    line-height: 1.4;
+    margin-bottom: 1rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+`
+
+const ModalMetadata = styled.div`
+  display: flex;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  
+  @media (max-width: 768px) {
+    margin-bottom: 1.25rem;
+  }
+  
+  @media (max-width: 480px) {
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+`
+
+const ModalMetadataItem = styled.span`
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.7);
+  
+  @media (max-width: 480px) {
+    font-size: 0.8rem;
+  }
+`
+
+const ModalMetadataDot = styled.span`
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.4);
+  margin: 0 8px;
+  
+  @media (max-width: 480px) {
+    width: 3px;
+    height: 3px;
+    margin: 0 6px;
+  }
+`
+
+const ModalButtonGroup = styled.div`
+  display: flex;
+  gap: 1rem;
+  margin-top: 1rem;
+  
+  @media (max-width: 768px) {
+    gap: 0.75rem;
+  }
+  
+  @media (max-width: 480px) {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+`
+
+const ModalButton = styled.button`
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.875rem;
+  background: ${(props) => (props.primary ? "linear-gradient(to right, #E91E63, #9C27B0)" : "rgba(255, 255, 255, 0.05)")};
+  border: ${(props) => (props.primary ? "none" : "1px solid rgba(255, 255, 255, 0.2)")};
+  border-radius: 10px;
+  color: white;
+  font-size: 1rem;
+  font-weight: ${(props) => (props.primary ? "600" : "500")};
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: ${(props) =>
+      props.primary ? "linear-gradient(to right, #E91E63, #9C27B0)" : "rgba(255, 255, 255, 0.1)"};
+    transform: ${(props) => (props.primary ? "translateY(-2px)" : "none")};
+    box-shadow: ${(props) => (props.primary ? "0 4px 12px rgba(233, 30, 99, 0.3)" : "none")};
+  }
+  
+  @media (max-width: 768px) {
+    padding: 0.75rem;
+    font-size: 0.95rem;
+    
+    svg {
+      width: 18px;
+      height: 18px;
     }
   }
-`
-
-const TruncatedDescription = styled.p`
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #ccc;
-  margin-bottom: 15px;
-`
-
-const CloseButton = styled.button`
-  background: transparent;
-  color: #fff;
-  border: 1px solid #fff;
-  padding: 10px 20px;
-  font-size: 16px;
-  cursor: pointer;
-  border-radius: 5px;
-  transition: all 0.3s ease-in-out;
-
-  &:hover {
-    background: rgba(255, 255, 255, 0.1);
+  
+  @media (max-width: 480px) {
+    padding: 0.7rem;
+    font-size: 0.9rem;
+    
+    svg {
+      width: 16px;
+      height: 16px;
+    }
   }
-
-  @media (max-width: 768px) {
-    font-size: 14px;
-    padding: 8px 16px;
-  }
-`
-
-const ButtonContainer = styled.div`
-  display: flex;
-  justify-content: space-between;
-  margin-top: 20px;
 `
 
 const LoaderContainer = styled.div`
@@ -735,7 +911,7 @@ const LoaderContainer = styled.div`
   align-items: center;
   width: 100vw;
   height: 100vh;
-  background-color: #000000;
+  background-color: #0a0a0a;
   position: fixed;
   top: 0;
   left: 0;
@@ -745,17 +921,22 @@ const LoaderContainer = styled.div`
 const Spinner = styled.div`
   width: 60px;
   height: 60px;
-  border: 6px solid rgba(255, 255, 255, 0.93);
-  border-top: 6px solid rgb(226, 30, 102);
+  border: 6px solid rgba(255, 255, 255, 0.1);
+  border-top: 6px solid #E91E63;
   border-radius: 50%;
-  animation: spin 1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-
-  @keyframes spin {
-    0% {
-      transform: rotate(0deg);
-    }
-    100% {
-      transform: rotate(360deg);
-    }
+  animation: ${spin} 1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  
+  @media (max-width: 480px) {
+    width: 50px;
+    height: 50px;
+    border-width: 5px;
+    border-top-width: 5px;
   }
 `
+
+const MovieCategory = styled.p`
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0;
+`
+
